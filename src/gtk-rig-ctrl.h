@@ -49,6 +49,9 @@ struct _gtk_rig_ctrl {
     GtkWidget      *DevSel2;    /*!< Second device selector */
     GtkWidget      *LockBut;
     GtkWidget      *cycle_spin;      /*!< Update timer cycle */
+    //mawe-
+    GtkWidget      *smurf;
+    //mawe+
 
     radio_conf_t   *conf;       /*!< Radio configuration */
     radio_conf_t   *conf2;      /*!< Secondary radio configuration */

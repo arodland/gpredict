@@ -217,6 +217,10 @@ static void render_type(GtkTreeViewColumn * col,
     case RIG_TYPE_TOGGLE_MAN:
         g_object_set(renderer, "text", _("FT817/857/897 (man)"), NULL);
         break;
+    
+    case RIG_TYPE_DUPLEX_910:
+        g_object_set(renderer, "text", _("IC-910"), NULL);
+        break;    
 
     default:
         g_object_set(renderer, "text", _("ERROR"), NULL);

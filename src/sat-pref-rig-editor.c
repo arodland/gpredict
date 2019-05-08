@@ -296,6 +296,7 @@ static GtkWidget *create_editor_widgets(radio_conf_t * conf)
                                    _("FT817/857/897 (auto)"));
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type),
                                    _("FT817/857/897 (manual)"));
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(type), _("IC-910"));                                   
     gtk_combo_box_set_active(GTK_COMBO_BOX(type), RIG_TYPE_RX);
     g_signal_connect(type, "changed", G_CALLBACK(type_changed), NULL);
     gtk_widget_set_tooltip_markup(type,

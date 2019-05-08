@@ -77,6 +77,14 @@ static void     exec_duplex_tx_cycle(GtkRigCtrl * ctrl);
 static void     exec_dual_rig_cycle(GtkRigCtrl * ctrl);
 static gboolean check_aos_los(GtkRigCtrl * ctrl);
 static gboolean set_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble freq);
+//mawe-
+static gboolean set_freq_mawe(GtkRigCtrl * ctrl, gint sock, gdouble freq);
+static gboolean set_rx_vfo_mawe(GtkRigCtrl * ctrl, gint sock);
+static gboolean set_tx_vfo_mawe(GtkRigCtrl * ctrl, gint sock);
+static gboolean set_mode_usb_mawe(GtkRigCtrl * ctrl, gint sock);
+static gboolean set_mode_lsb_mawe(GtkRigCtrl * ctrl, gint sock);
+static gboolean set_mode_fm_mawe(GtkRigCtrl * ctrl, gint sock);
+//mawe+
 static gboolean get_freq_simplex(GtkRigCtrl * ctrl, gint sock, gdouble * freq);
 static gboolean set_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble freq);
 static gboolean set_toggle(GtkRigCtrl * ctrl, gint sock);
@@ -1000,6 +1008,63 @@ static void rig_engaged_cb(GtkToggleButton * button, gpointer data)
     }
 }
 
+//mawe-
+static void mawe_toggle_mode(GtkToggleButton * button, gpointer data)
+{
+    GtkRigCtrl     *ctrl = GTK_RIG_CTRL(data);
+
+    if (ctrl->conf == NULL)
+    {
+        /* we don't have a working configuration */
+        sat_log_log(SAT_LOG_LEVEL_ERROR,
+                    _("%s: Controller does not have a valid configuration"),
+                    __func__);
+        return;
+    }
+
+    if (!gtk_toggle_button_get_active(button))
+    {
+        if (set_rx_vfo_mawe(ctrl, ctrl->sock)) {
+			ctrl->errcnt = 0;
+			g_usleep(WR_DEL);
+			if (!set_mode_usb_mawe(ctrl, ctrl->sock))
+            {
+                ctrl->errcnt++;
+            }
+		}
+		if (set_tx_vfo_mawe(ctrl, ctrl->sock)) {
+			ctrl->errcnt = 0;
+			g_usleep(WR_DEL);
+			if (!set_mode_lsb_mawe(ctrl, ctrl->sock))
+            {
+                ctrl->errcnt++;
+            }
+		}
+    }
+    else
+    {
+        if (set_rx_vfo_mawe(ctrl, ctrl->sock)) {
+			ctrl->errcnt = 0;
+			g_usleep(WR_DEL);
+			if (!set_mode_fm_mawe(ctrl, ctrl->sock))
+            {
+                ctrl->errcnt++;
+            }
+		}
+		if (set_tx_vfo_mawe(ctrl, ctrl->sock)) {
+			ctrl->errcnt = 0;
+			g_usleep(WR_DEL);
+			if (!set_mode_fm_mawe(ctrl, ctrl->sock))
+            {
+                ctrl->errcnt++;
+            }
+		}
+    }
+}
+
+//mawe+
+
+
 static GtkWidget *create_target_widgets(GtkRigCtrl * ctrl)
 {
     GtkWidget      *frame, *table, *label, *track;
@@ -1317,6 +1382,18 @@ static GtkWidget *create_conf_widgets(GtkRigCtrl * ctrl)
                      ctrl);
     gtk_grid_attach(GTK_GRID(table), ctrl->LockBut, 2, 0, 1, 1);
 
+//MAWE-
+ctrl->smurf = gtk_toggle_button_new_with_label(_("FM/SSB"));
+    gtk_widget_set_tooltip_text(ctrl->smurf,
+                                _("Toggles the uplink and downlink mode"));
+    g_signal_connect(ctrl->smurf, "toggled", G_CALLBACK(mawe_toggle_mode), ctrl);
+    gtk_grid_attach(GTK_GRID(table), ctrl->smurf, 2, 1, 1, 1);
+    
+//MAWE+    
+
+    /* Now, load config */
+    primary_rig_selected_cb(GTK_COMBO_BOX(ctrl->DevSel), ctrl);
+
     /* cycle period */
     label = gtk_label_new(_("Cycle:"));
     g_object_set(label, "xalign", 1.0f, "yalign", 0.5f, NULL);
@@ -1514,12 +1591,27 @@ static gboolean setup_split(GtkRigCtrl * ctrl)
                     ctrl->conf->vfoUp);
         return FALSE;
     }
-
+    
+	
     retcode = send_rigctld_command(ctrl, ctrl->sock, buff, buffback, 128);
     g_free(buff);
 
     return (check_set_response(buffback, retcode, __func__));
 }
+
+
+static gboolean setup_satmode(GtkRigCtrl * ctrl)
+{
+    gchar          *buff;
+    gchar           buffback[256];
+    gboolean        retcode;
+    
+	buff = g_strdup("U SATMODE 1\x0a");
+    retcode = send_rigctld_command(ctrl, ctrl->sock, buff, buffback, 128);
+    g_free(buff);
+    return (check_set_response(buffback, retcode, __func__));
+}
+
 
 static gboolean rig_ctrl_timeout_cb(gpointer data)
 {
@@ -1565,10 +1657,16 @@ static void exec_rx_cycle(GtkRigCtrl * ctrl)
      */
     if ((ctrl->engaged) && (ctrl->lastrxf > 0.0) && (ptt == FALSE))
     {
-        if (!get_freq_simplex(ctrl, ctrl->sock, &readfreq))
-        {
-            /* error => use a passive value */
-            ctrl->errcnt++;
+        if (set_rx_vfo_mawe(ctrl, ctrl->sock)) {
+            ctrl->errcnt = 0;
+            g_usleep(WR_DEL);
+            if (!get_freq_simplex(ctrl, ctrl->sock, &readfreq))
+            {
+                /* error => use a passive value */
+                readfreq = ctrl->lastrxf;
+                ctrl->errcnt++;
+            }
+
         }
         else if (fabs(readfreq - ctrl->lastrxf) >= 1.0)
         {
@@ -1630,18 +1728,29 @@ static void exec_rx_cycle(GtkRigCtrl * ctrl)
     if ((ctrl->engaged) && (ptt == FALSE) &&
         (fabs(ctrl->lastrxf - tmpfreq) >= 1.0))
     {
-        if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq))
-        {
-            /* reset error counter */
-            ctrl->errcnt = 0;
+		//MAWE-
+       // if (set_freq_simplex(ctrl, ctrl->sock, tmpfreq))
+       // {
+       //     /* reset error counter */
+       //     ctrl->errcnt = 0;
 
             /* give radio a chance to set frequency */
-            g_usleep(WR_DEL);
+       //     g_usleep(WR_DEL);
 
             /* The actual frequency might be different from what we have set because
                the tuning step is larger than what we work with (e.g. FT-817 has a
                smallest tuning step of 10 Hz). Therefore we read back the actual
                frequency from the rig. */
+        if (set_rx_vfo_mawe(ctrl, ctrl->sock)) {
+            ctrl->errcnt = 0;
+            g_usleep(WR_DEL);
+            if (set_freq_mawe(ctrl, ctrl->sock, tmpfreq)) {
+                ctrl->errcnt = 0;
+                g_usleep(WR_DEL);
+                get_freq_simplex(ctrl, ctrl->sock, &tmpfreq);
+                ctrl->lastrxf = tmpfreq;
+            }
+
             get_freq_simplex(ctrl, ctrl->sock, &tmpfreq);
             ctrl->lastrxf = tmpfreq;
 
@@ -1661,6 +1770,7 @@ static void exec_rx_cycle(GtkRigCtrl * ctrl)
         {
             ctrl->errcnt++;
         }
+       
     }
 
     /* Remember PTT state, to avoid misinterpreting VFO changes as dial
@@ -1896,12 +2006,30 @@ static void exec_duplex_tx_cycle(GtkRigCtrl * ctrl)
      */
     if ((ctrl->engaged) && (ctrl->lasttxf > 0.0))
     {
-        if (!get_freq_toggle(ctrl, ctrl->sock, &readfreq))
-        {
-            /* error => use a passive value */
-            readfreq = ctrl->lasttxf;
-            ctrl->errcnt++;
-        }
+		
+		//mawe-
+      //  if (!get_freq_toggle(ctrl, ctrl->sock, &readfreq))
+      //  {
+      //      /* error => use a passive value */
+      //      readfreq = ctrl->lasttxf;
+      //      ctrl->errcnt++;
+      //  }
+      if (set_tx_vfo_mawe(ctrl, ctrl->sock)) {
+			ctrl->errcnt = 0;
+			g_usleep(WR_DEL);
+			if (!get_freq_simplex(ctrl, ctrl->sock, &readfreq))
+			{
+				/* error => use a passive value */
+				readfreq = ctrl->lasttxf;
+				ctrl->errcnt++;
+			}
+			
+	   } else {
+		   readfreq = ctrl->lasttxf;
+		   ctrl->errcnt++;
+	   }
+      
+        //mawe+
 
         if (fabs(readfreq - ctrl->lasttxf) >= 1.0)
         {
@@ -1964,22 +2092,37 @@ static void exec_duplex_tx_cycle(GtkRigCtrl * ctrl)
     /* if device is engaged, send freq command to radio */
     if ((ctrl->engaged) && (fabs(ctrl->lasttxf - tmpfreq) >= 1.0))
     {
-        if (set_freq_toggle(ctrl, ctrl->sock, tmpfreq))
-        {
-            /* reset error counter */
-            ctrl->errcnt = 0;
+		//MAWE-
+		
+        //if (set_freq_toggle(ctrl, ctrl->sock, tmpfreq))
+       // {
+       //     /* reset error counter */
+       //     ctrl->errcnt = 0;
 
-            /* give radio a chance to set frequency */
-            g_usleep(WR_DEL);
+       //     /* give radio a chance to set frequency */
+       //     g_usleep(WR_DEL);
 
             /* The actual frequency migh be different from what we have set because
                the tuning step is larger than what we work with (e.g. FT-817 has a
                smallest tuning step of 10 Hz). Therefore we read back the actual
                frequency from the rig. */
-            get_freq_toggle(ctrl, ctrl->sock, &tmpfreq);
-            ctrl->lasttxf = tmpfreq;
-        }
-        else
+       //     get_freq_toggle(ctrl, ctrl->sock, &tmpfreq);
+       //     ctrl->lasttxf = tmpfreq;
+       // }
+       
+       if (set_tx_vfo_mawe(ctrl, ctrl->sock)) {
+			ctrl->errcnt = 0;
+			g_usleep(WR_DEL);
+			if (set_freq_mawe(ctrl, ctrl->sock, tmpfreq)) {
+				ctrl->errcnt = 0;
+				g_usleep(WR_DEL);
+				get_freq_simplex(ctrl, ctrl->sock, &tmpfreq);
+                ctrl->lasttxf = tmpfreq;
+			}
+			
+	   }
+       
+       else
         {
             ctrl->errcnt++;
         }
@@ -2385,6 +2528,106 @@ static gboolean set_freq_toggle(GtkRigCtrl * ctrl, gint sock, gdouble freq)
 
 }
 
+//MAWE-
+
+static gboolean set_rx_vfo_mawe(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    /* send command */
+    buff = g_strdup_printf("V Main\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+
+}
+
+static gboolean set_tx_vfo_mawe(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    /* send command */
+    buff = g_strdup_printf("V Sub\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+
+}
+
+
+
+static gboolean set_freq_mawe(GtkRigCtrl * ctrl, gint sock, gdouble freq)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    /* send command */
+    buff = g_strdup_printf("F %10.0f\x0a", freq);
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+
+}
+
+static gboolean set_mode_usb_mawe(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    /* send command */
+    buff = g_strdup_printf("M USB 0\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+
+}
+
+static gboolean set_mode_lsb_mawe(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    /* send command */
+    buff = g_strdup_printf("M LSB 0\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+
+}
+
+
+
+static gboolean set_mode_fm_mawe(GtkRigCtrl * ctrl, gint sock)
+{
+    gchar          *buff;
+    gchar           buffback[128];
+    gboolean        retcode;
+
+    /* send command */
+    buff = g_strdup_printf("M FM 0\x0a");
+    retcode = send_rigctld_command(ctrl, sock, buff, buffback, 128);
+    g_free(buff);
+
+    return (check_set_response(buffback, retcode, __func__));
+
+}
+
+
+//MAWE+
+
+
 /*
  * Turn on the radios toggle mode
  *
@@ -2760,6 +3003,11 @@ static void rigctrl_open(GtkRigCtrl * data)
             ctrl->last_toggle_tx = -1;
             exec_toggle_cycle(ctrl);
             break;
+            
+        case RIG_TYPE_DUPLEX_910:
+            setup_satmode(ctrl);
+            exec_duplex_cycle(ctrl);
+            break;    
 
         default:
             /* this is an error! */
@@ -2844,6 +3092,10 @@ gpointer rigctl_run(gpointer data)
             case RIG_TYPE_TOGGLE_AUTO:
             case RIG_TYPE_TOGGLE_MAN:
                 exec_toggle_cycle(t_ctrl);
+                break;
+
+			case RIG_TYPE_DUPLEX_910:
+                exec_duplex_cycle(t_ctrl);
                 break;
 
             default:
